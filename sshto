@@ -12,4 +12,5 @@ if { $colon_index == -1 } {
 }
 set extra_args {}
 if { ![empty_string $host(id_path)] } { lappend extra_args -o IdentityFile=$host(id_path) }
+::term::ansi::send::title $host(host_name)
 sshpass [list ssh "$host(login)@$ssh_host" -p $host(port) {*}$extra_args] $host(pass)
