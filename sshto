@@ -1,0 +1,15 @@
+#!/usr/bin/tclsh
+set data_dir "/usr/share/tkhostman/"
+source "$data_dir/common.tcl"
+
+init_conf
+get_host_by_name [lindex $argv 0] host
+set colon_index [string first ":" $host(addr)]
+if { $colon_index == -1 } {
+	set ssh_host $host(addr)
+} else {
+	set ssh_host [string range $host(addr) 0 [expr $colon_index-1]]
+}
+set extra_args {}
+if { ![empty_string $host(id_path)] } { lappend extra_args -o IdentityFile=$host(id_path) }
+sshpass [list ssh "$host(login)@$ssh_host" -p $host(port) {*}$extra_args] $host(pass)

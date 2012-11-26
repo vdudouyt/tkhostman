@@ -1,0 +1,6 @@
+#!/usr/bin/tclsh
+package require Expect
+set data_dir "/usr/share/tkhostman/"
+source "$data_dir/common.tcl"
+
+sshpass $argv $::env(SSHPASS)

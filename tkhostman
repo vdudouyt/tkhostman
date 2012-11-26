@@ -1,0 +1,334 @@
+#!/usr/bin/tclsh
+
+package require Tclx
+package require Tk
+
+array set hosts_conf {}
+set supported_protos { }
+set data_dir "/usr/share/tkhostman/"
+source "$data_dir/common.tcl"
+source "$data_dir/plugin_ssh.tcl"
+source "$data_dir/plugin_ftp.tcl"
+set default_root "/net"
+# Database-stored columns
+set column_names "host_name proto addr mount_point port login pass id_path"
+# Extra columns
+set column_extra "mounted"
+
+proc init_gui {} {
+	package require BWidget
+	package require tablelist
+	global hosts
+	global hosts_conf
+	global column_names
+	global column_extra
+	global app_title
+	global search
+	set app_title "TkHostMan"
+	set search {}
+	wm title . $app_title
+	wm geometry . "1000x450"
+	tablelist::tablelist .t -columns {0 "Host"
+					  0 "Type"
+					  0 "Addr"
+					  0 "Mount Point"
+					  0 "Port"
+					  0 "Login"
+					  0 "Password"
+					  0 "Key"
+					  0 "Mounted"} \
+				-stretch all \
+				-background white \
+				-editstartcommand edit_start \
+				-editendcommand edit_end
+	pack .t -fill both -expand 1 -side top
+	tablelist::addBWidgetComboBox
+	set i 0
+	foreach n [concat $column_names $column_extra] {
+		.t columnconfigure $i -name $n -editable yes
+		incr i
+	}
+	.t columnconfigure 1 -editwindow ComboBox
+	.t columnconfigure 8 -editwindow ComboBox
+	fill_values {}
+	event add <<Toggle>> <m>
+	event add <<Toggle>> <u>
+	event add <<Toggle>> <s>
+	# event add <<Toggle>> <Space>
+	bind [.t bodytag] <<Toggle>> {
+		set row [.t curselection]
+		if { ![empty_string $row] } {
+			set index [.t cellindex "$row,8"]
+			set host_id [.t rowcget $row -name]
+			db eval { SELECT * FROM hosts WHERE id=$host_id } host_conf {
+				switch "%K" {
+					m {
+						mount host_conf
+						.t cellconfigure $index -text "Yes"
+					}
+					u {
+						umount host_conf
+						.t cellconfigure $index -text "No"
+					}
+					s {
+						ssh_console host_conf
+					}
+				}
+			}
+		}
+	}
+	menu .popupMenu
+	.popupMenu add command -label "Mount" -command "popupmenu_act mount"
+	.popupMenu add command -label "Umount" -command "popupmenu_act umount"
+	.popupMenu add command -label "SSH Console" -command "popupmenu_act console"
+	.popupMenu add command -label "Delete" -command "popupmenu_act delete"
+	.popupMenu add command -label "Import key" -command "popupmenu_act ask_key"
+	bind [.t bodytag] <<Button3>> {
+		.t selection clear 0 [.t size]
+		set row [.t containing $tablelist::y]
+		.t selection set [ expr $row ]
+		tk_popup .popupMenu %X %Y
+	}
+	event add <<Search>> <Control-s>
+	bind [.t bodytag] <<Search>> {
+		tk::entry .str -textvariable search
+		pack .str -fill x
+		focus .str
+		bind .str <Return> {
+			fill_values $search
+			if { ![empty_string $search] } { wm title . "$app_title search: $search" }
+			destroy .str
+			focus .t
+		}
+		bind .str <Escape> {
+			set search {}
+			fill_values {}
+			wm title . $app_title
+			destroy .str
+			focus .t
+		}
+	}
+	bind [.t bodytag] <Escape> {
+		set search {}
+		fill_values {}
+		.t selection set 0
+		wm title . $app_title
+	}
+	bind [.t bodytag] <Control-r> {
+		fill_values $search
+		.t selection set 0
+	}
+	bind [.t bodytag] <Control-o> {
+		set row [.t curselection]
+		ask_key $row
+	}
+	.t selection set 0
+	focus .t
+}
+
+proc ask_key {row} {
+	global conf_root
+	set index [.t cellindex "$row,7"]
+	set host_id [.t rowcget $row -name]
+	set types {
+		    {{OpenSSH private keys} *}
+		    {{PuTTy keys} {.ppk}}
+		  }
+	set filename [tk_getOpenFile -initialdir $::env(HOME) -filetypes $types]
+	if { [empty_string $filename] } {
+		return
+	}
+	set keys_dir_path "$conf_root/keys"
+	if { ![file exists $keys_dir_path] } {
+		mkdir $keys_dir_path
+		chmod 0700 $keys_dir_path
+	}
+	file stat $filename stat
+	if { $stat(size) > 10240 } {
+		sshpass_msg "File is too large: $filename"
+		return
+	}
+	if { [regexp "\.ppk$" $filename] } {
+		puts "Importing putty key: $filename"
+		exec sshimport $filename
+		regsub {\.\w+$} $filename ".ssh" filename
+	}
+	regexp {\/[^\/]+$} $filename name_short
+	regsub {^\/} $name_short {} name_short
+	set filename_new "$keys_dir_path/$name_short"
+	if { ![file exists $filename] } {
+		sshpass_msg "Couldn't open file: $filename"
+		return
+	}
+	set i 1
+	while { [file exists $filename_new] } {
+		if { [read_file $filename 10240] == [read_file $filename_new 10240] } {
+			# Use an existing file
+			break
+		}
+		regsub {\([0-9]+\)$} $filename_new {} filename_new
+		regsub {$} $filename_new "($i)" filename_new
+		incr i
+	}
+	if { ![file exists $filename_new] } {
+		file copy $filename $filename_new
+		chmod 0600 $filename_new
+	}
+	set filename $filename_new
+	db eval { UPDATE hosts SET id_path=$filename WHERE id=$host_id }
+	.t cellconfigure $index -text $filename
+}
+
+# Override callbacks providen by common.tcl
+proc sshpass_msg {err} {
+	tk_messageBox -message $err -type ok -icon error
+}
+
+proc sshpass_ask {q} {
+	return [tk_messageBox -message $q -type yesno]
+}
+# ---
+
+proc fill_values {search} {
+	global column_names
+	set sql { SELECT * FROM hosts }
+	if { ![empty_string $search] } {
+		set sql "$sql WHERE host_name LIKE '%$search%' OR addr LIKE '%$search%'"
+	}
+	.t delete 0 end
+	read_mtab mtab
+	db eval $sql values {
+		set values(pass) [shadow_string $values(pass)]
+		set chunks {}
+		foreach col_name $column_names {
+			lappend chunks $values($col_name)
+		}
+		set mount_point $values(mount_point)
+		if { [info exists mtab($mount_point)] } {
+			lappend chunks "Yes"
+		} else {
+			lappend chunks "No"
+		}
+		.t insert end $chunks
+		.t rowconfigure end -name $values(id)
+	}
+	.t insert end {}
+}
+
+proc popupmenu_act {act} {
+	upvar tablelist::x x
+	upvar tablelist::y y
+	set row [.t containing $y]
+	set index [.t cellindex "$row,8"]
+	set host_id [.t rowcget $row -name]
+	db eval { SELECT * FROM hosts WHERE id=$host_id } host_conf {
+		switch $act {
+			mount {
+				mount host_conf
+				.t cellconfigure $index -text "Yes"
+			}
+			umount {
+				umount host_conf
+				.t cellconfigure $index -text "No"
+			}
+			console {
+				ssh_console host_conf
+			}
+			delete {
+				.t delete $row
+				db eval { DELETE FROM hosts WHERE id=$host_id }
+			}
+			ask_key {
+				ask_key $row
+			}
+		}
+	}
+}
+
+proc empty_string {s} {
+	return [expr ![string length $s]]
+}
+
+proc edit_start {tbl row col text} {
+	global supported_protos
+	set w [$tbl editwinpath]
+	switch [$tbl columncget $col -name] {
+		mounted {
+			$w configure -values "Yes No"
+		}
+		proto {
+			$w configure -values $supported_protos
+		}
+		pass {
+			set host_id [.t rowcget $row -name]
+			db eval { SELECT pass FROM hosts WHERE id=$host_id } host_conf {
+				set text $host_conf(pass)
+			}
+		}
+	}
+	return $text
+}
+
+proc shadow_string {text} {
+	set pass_length [string length $text]
+	return [string repeat "*" $pass_length]
+}
+
+proc edit_end {tbl row col text} {
+	global default_root
+	global supported_protos
+	global column_names
+
+	set host_id [.t rowcget $row -name]
+	if { [empty_string [db eval { SELECT * FROM hosts WHERE id=$host_id }]] } {
+		db eval { INSERT INTO hosts (host_name, proto, addr, mount_point, port) VALUES ("", "ssh", "", $default_root, 22) }
+		$tbl insert end {}
+		set host_id [db last_insert_rowid]
+		$tbl rowconfigure $row -name $host_id
+	}
+	set column_name [$tbl columncget $col -name]
+	set text_visible $text
+	db eval { SELECT * FROM hosts WHERE id=$host_id } host_conf {
+		set i 0
+		foreach col_name $column_names {
+			set value $host_conf($col_name)
+			set c_i [$tbl cellindex "$row,$i"]
+			$tbl cellconfigure $c_i -text $value
+			incr i
+		}
+		db eval { SELECT * FROM hosts WHERE id=$host_id } host_conf {
+			switch $column_name {
+				mounted {
+					if { ![string compare $text Yes] } {
+						mount host_conf
+						set text Yes
+					} else {
+						umount host_conf
+						set text No
+					}
+				}
+				proto {
+					if { [lsearch $supported_protos $text] == -1} { set text $host_conf(proto) }
+				}
+				mount_point {
+				}
+				pass {
+					set text_visible [shadow_string $text]
+				}
+			}
+		}
+		if { [lsearch $column_names $column_name] != -1 } {
+			db eval "UPDATE hosts SET $column_name=\"$text\" WHERE id=$host_id"
+		}
+		return $text_visible
+	}
+}
+
+proc ssh_console {host_conf} {
+	upvar $host_conf conf
+	set ::env(SSHPASS) $conf(pass)
+	exec /usr/bin/x-terminal-emulator -title $conf(host_name) -e sshto $conf(host_name)
+}
+
+init_conf 
+init_gui
