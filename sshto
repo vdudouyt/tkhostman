@@ -2,8 +2,22 @@
 set data_dir "/usr/share/tkhostman/"
 source "$data_dir/common.tcl"
 
+proc print_usage_and_exit {} {
+	global argv0
+	puts "usage: $argv0 hostname"
+	exit -1
+}
+
 init_conf
-get_host_by_name [lindex $argv 0] host
+set hostname [lindex $argv 0]
+if { [empty_string $hostname] } {
+	print_usage_and_exit
+}
+get_host_by_name $hostname host
+if { ! [info exists host(addr)] } {
+	puts "Unknown host: $hostname"
+	exit -1
+}
 set colon_index [string first ":" $host(addr)]
 if { $colon_index == -1 } {
 	set ssh_host $host(addr)
