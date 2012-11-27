@@ -1,4 +1,5 @@
 if { [file exist /usr/lib/tcltk/sqlite3/libtclsqlite3.so] } {
+	# 'package require sqlite3' found non-working on Ubuntu 11.10
 	load /usr/lib/tcltk/sqlite3/libtclsqlite3.so
 } else {
 	package require sqlite3
@@ -102,7 +103,11 @@ Are you sure you want to continue connecting?"]
 				if { [info exists conf(chdir)] } {
 					exp_send "cd $conf(chdir)\n"
 				}
-				interact
+				interact {
+					-o eof {
+						exit 0
+					}
+				}
 			}
 			exp_continue
 		} eof {
