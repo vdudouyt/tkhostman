@@ -62,15 +62,22 @@ proc sshpass_ask {q} {
 }
 # ---
 
-proc sshpass {cmd pass} {
+proc sshpass {cmd args} {
+	# A wrapper for OpenSSH client
+	# cmd: command to execute
+	# -pass <s>: password to input
+	# -title <s>: force a terminal title
 	package require Expect
 	package require Tclx
 	global spawn_out
 	trap {
+		# Handle the terminal resizes
 		set rows [stty rows]
 		set cols [stty columns]
 		stty rows $rows columns $cols < $spawn_out(slave,name)
 	} WINCH 
+
+	array set argv $args
 
 	spawn -noecho -ignore HUP {*}$cmd
 	set pass_counter 0
@@ -81,7 +88,7 @@ proc sshpass {cmd pass} {
 			if { $pass_counter > 0 } {
 				sshpass_msg "Invalid password"
 			} else {
-				exp_send "$pass\n"
+				exp_send "$argv(-pass)\n"
 				incr pass_counter
 				exp_continue
 			}

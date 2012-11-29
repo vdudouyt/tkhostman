@@ -11,5 +11,5 @@ proc mount_ssh { host } {
 	# Preparing statement to eval
 	set extra_args {}
 	if { ![empty_string $conf(id_path)] } { lappend extra_args -o IdentityFile=$conf(id_path) }
-	sshpass [list sshfs "$conf(login)@$conf(addr)" $conf(mount_point) -p $conf(port) -o intr {*}$extra_args] $conf(pass)
+	sshpass [list sshfs "$conf(login)@$conf(addr)" $conf(mount_point) -p $conf(port) -o intr {*}$extra_args] -pass $conf(pass)
 }
