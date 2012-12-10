@@ -107,8 +107,9 @@ Are you sure you want to continue connecting?"]
 				|| [regexp "ermanently added" $line] } {
 					exp_continue
 			} else {
-				if { [info exists conf(chdir)] } {
-					exp_send "cd $conf(chdir)\n"
+				if { [info exists argv(-exec)] } {
+					exp_send "$argv(-exec)\n"
+					exp_send "exit\n"
 				}
 				interact {
 					-o eof {

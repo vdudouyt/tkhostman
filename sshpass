@@ -3,4 +3,4 @@ package require Expect
 set data_dir "/usr/share/tkhostman/"
 source "$data_dir/common.tcl"
 
-sshpass $argv -pass $::env(SSHPASS)
+sshpass {*}$argv -pass $::env(SSHPASS)

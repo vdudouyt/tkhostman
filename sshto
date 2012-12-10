@@ -10,6 +10,7 @@ proc print_usage_and_exit {} {
 
 init_conf
 set hostname [lindex $argv 0]
+set argv [lrange $argv 1 end]
 if { [empty_string $hostname] } {
 	print_usage_and_exit
 }
@@ -26,4 +27,4 @@ if { $colon_index == -1 } {
 }
 set extra_args {}
 if { ![empty_string $host(id_path)] } { lappend extra_args -o IdentityFile=$host(id_path) }
-sshpass [list ssh "$host(login)@$ssh_host" -p $host(port) {*}$extra_args] -pass $host(pass)
+sshpass [list ssh "$host(login)@$ssh_host" -p $host(port) {*}$extra_args] -pass $host(pass) {*}$argv
