@@ -1,0 +1,184 @@
+#!/usr/bin/tclsh
+package require Tclx
+package require base64
+
+proc empty_string {s} {
+	return [expr ![string length $s]]
+}
+
+proc read_key_putty { out_1 filename } {
+	upvar $out_1 out
+	set fp [open $filename "r"]
+	set lines [split [read $fp] "\n"]
+	close $fp
+	set public_data ""
+	set private_data ""
+	set public_d 0
+	set private_d 0
+	foreach line $lines {
+		if { $public_d > 0 } {
+			set public_data "$public_data$line"
+			incr public_d -1
+			continue
+		} elseif { $private_d > 0 } {
+			set private_data "$private_data$line"
+			incr private_d -1
+			continue
+		}
+		regexp "^(.*?):(.*)$" $line match key value
+		set value [string trim $value]
+		set value [string trimright $value]
+		if { [string toupper $key] == [string toupper "Public-Lines"] } {
+			set public_d $value
+		} elseif { [string toupper $key] == [string toupper "Private-Lines"] } {
+			set private_d $value
+		}
+	}
+	array set out [list public [::base64::decode $public_data] private [::base64::decode $private_data]]
+}
+
+proc get_32bit { str pos } {
+	set i 0
+	foreach byte "a b c d" {
+		scan [string index $str [expr $pos + $i]] "%c" $byte
+		incr i
+	}
+	return [expr { ($a << 24) + ($b << 16) + ($c << 8) + $d } ]
+}
+
+proc read_chunk { str pos_1 } {
+	upvar $pos_1 pos
+	set length [get_32bit $str $pos]
+	incr pos 4
+	set out [string range $str $pos [expr $pos+$length-1]]
+	set len [string length $out]
+	incr pos $length
+	return $out
+}
+
+proc chunk_to_bigint { chunk } {
+	set result 0
+	set len [string length $chunk]
+	for { set i 0 } { $i < $len } { incr i } {
+		set l [expr $len - $i - 1]
+		scan [string index $chunk $i] "%c" byte
+		set result [expr $result | ($byte << ($l * 8))]
+	}
+	return $result
+}
+
+proc bigint_to_chunk { bigint } {
+	set result "\0"
+	for { set n 1 } { $bigint >> (8 * $n) > 0 } { incr n } { continue }
+	for { set i 0 } { $i < $n } { incr i } {
+		set byte [format "%c" [expr ($bigint >> (8 * ($n - $i - 1)) & 0xff)]]
+		set result "$result$byte"
+	}
+	return $result
+}
+
+proc translate_private_rsa { key_1 } {
+	upvar $key_1 key
+	set pos 0
+	foreach var "keytype e n" {
+		set $var [read_chunk $key(public) pos]
+	}
+	set pos 0
+	foreach var "d p q iqmp" {
+		set $var [read_chunk $key(private) pos]
+	}
+	set bd [chunk_to_bigint $d]
+	set bq [chunk_to_bigint $q]
+	set bp [chunk_to_bigint $p]
+	set dmp [bigint_to_chunk [expr $bd % ($bp-1)]]
+	set dmq [bigint_to_chunk [expr $bd % ($bq-1)]]
+	
+	if { [empty_string $e] || [empty_string $iqmp] } {
+		puts "Insufficient data"
+		exit
+	}
+	return [list "\0" $n $e $d $p $q $dmp $dmq $iqmp]
+}
+
+proc translate_private_dss { key_1 } {
+	upvar $key_1 key
+	set pos 0
+	foreach var "keytype p q g y" {
+		set $var [read_chunk $key(public) pos]
+	}
+	set pos 0
+	foreach var "x" {
+		set $var [read_chunk $key(private) pos]
+	}
+	if { [empty_string $x] || [empty_string $y] } {
+		puts "Insufficient data"
+		exit
+	}
+	return [list "\0" $p $q $g $y $x]
+}
+
+proc build_asn1_subscr { id length flags } {
+	set result ""
+	if { $id <= 30 } {
+		set byte [expr $id | $flags]
+		set char [format "%c" $byte]
+		set result "$result$char"
+	} else {
+		puts "not supported"
+	}
+	if { $length < 128 } {
+		set char [format "%c" $length]
+		set result "$result$char"
+	} else {
+		for { set n 1 } { $length >> (8 * $n) } { incr n } { continue }
+		set char [format "%c" [expr 0x80 | $n]]
+		set result "$result$char"
+		for { set i 0 } { $i < $n } { incr i } {
+			set byte [expr ($length >> (8 * ($n - $i - 1))) & 0xff]
+			set char [format "%c" $byte]
+			set result "$result$char"
+		}
+	}
+	return $result
+}
+
+proc openssh_write { key_1 } {
+	upvar $key_1 key
+	set pos 0
+	set keytype [read_chunk $key(public) pos]
+	if { $keytype == "ssh-rsa" } {
+		set data [translate_private_rsa key]
+		set header "-----BEGIN RSA PRIVATE KEY-----"
+		set footer "-----END RSA PRIVATE KEY-----"
+	} elseif { $keytype == "ssh-dss" } {
+		set data [translate_private_dss key]
+		set header "-----BEGIN DSA PRIVATE KEY-----"
+		set footer "-----END DSA PRIVATE KEY-----"
+	} else {
+		puts "Unknown key type: $keytype"
+		exit
+	}
+	set len 0
+	set out ""
+	foreach chunk $data {
+		set chunk_length [string length $chunk]
+		set subscr_length [string length [build_asn1_subscr 2 $chunk_length 0]]
+		incr len $subscr_length
+		incr len $chunk_length
+	}
+	set chunk [build_asn1_subscr 16 $len 32]
+	set out "$out$chunk"
+	foreach chunk $data {
+		set chunk_length [string length $chunk]
+		set chunk1 [build_asn1_subscr 2 $chunk_length 0]
+		set out "$out$chunk1$chunk"
+	}
+	set base64 [::base64::encode $out]
+	return "$header\n$base64\n$footer\n"
+}
+
+set fname [lindex $argv 0]
+read_key_putty key $fname
+set fname [regsub {\.\w+$} $fname ".ssh"]
+write_file $fname [openssh_write key]
+chmod 0600 $fname
