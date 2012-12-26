@@ -40,7 +40,8 @@ proc init_gui {} {
 				-stretch all \
 				-background white \
 				-editstartcommand edit_start \
-				-editendcommand edit_end
+				-editendcommand edit_end \
+				-selectmode extended
 	pack .t -fill both -expand 1 -side top
 	tablelist::addBWidgetComboBox
 	set i 0
