@@ -2,7 +2,7 @@
 DATADIR=$(DESTDIR)/usr/share/tkhostman/
 BINDIR=$(DESTDIR)/usr/bin/
 COMPLETIONDIR=$(DESTDIR)/etc/bash_completion.d/
-SOURCES=common/common.tcl common/main.tcl common/plugin_ftp.tcl common/plugin_ssh.tcl common/sshpass.tcl
+SOURCES=common/common.tcl common/main.tcl common/plugin_ftp.tcl common/plugin_ssh.tcl
 EXECUTABLES=tkhostman sshto sshpass
 
 all:
