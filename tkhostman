@@ -57,8 +57,7 @@ proc init_gui {} {
 	event add <<Toggle>> <s>
 	# event add <<Toggle>> <Space>
 	bind [.t bodytag] <<Toggle>> {
-		set row [.t curselection]
-		if { ![empty_string $row] } {
+		foreach row [.t curselection] {
 			set index [.t cellindex "$row,8"]
 			set host_id [.t rowcget $row -name]
 			db eval { SELECT * FROM hosts WHERE id=$host_id } host_conf {
