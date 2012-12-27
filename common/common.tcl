@@ -76,6 +76,10 @@ proc sshpass {cmd args} {
 		set cols [stty columns]
 		stty rows $rows columns $cols < $spawn_out(slave,name)
 	} WINCH 
+	signal trap SIGCHLD {
+		# No zombies
+		catch { set status [wait -nohang] }
+	} 
 
 	array set argv $args
 
