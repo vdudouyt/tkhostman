@@ -8,23 +8,49 @@ proc print_usage_and_exit {} {
 	exit -1
 }
 
+proc start_ssh_session {hostname args} {
+	get_host_by_name $hostname host
+		if { ! [info exists host(addr)] } {
+			puts "Unknown host: $hostname"
+				exit -1
+		}
+	set colon_index [string first ":" $host(addr)]
+		if { $colon_index == -1 } {
+			set ssh_host $host(addr)
+		} else {
+			set ssh_host [string range $host(addr) 0 [expr $colon_index-1]]
+		}
+	set extra_args {}
+	if { ![empty_string $host(id_path)] } { lappend extra_args -o IdentityFile=$host(id_path) }
+	# Use the core function to start SSH session
+	sshpass [list ssh "$host(login)@$ssh_host" -p $host(port) {*}$extra_args] -pass $host(pass) {*}$args
+}
+
+proc start_tmux_session {main args} {
+	set session_name [clock seconds]
+	exec tmux start-server
+	exec tmux new-session -d -s $session_name
+	exec tmux send-keys "sshto $main\n"
+	foreach hostname $args {
+		exec tmux split -p 80 -t $session_name
+		exec tmux send-keys "sshto $hostname\n"
+	}
+	exec tmux select-layout main-vertical
+	exec tmux select-pane -t0
+	exec tmux resize-pane -L 50
+	exec tmux attach -t $session_name
+}
+
 init_conf
-set hostname [lindex $argv 0]
-set argv [lrange $argv 1 end]
-if { [empty_string $hostname] } {
+
+if { [llength $argv] == 0} {
+	# No arguments supplied
 	print_usage_and_exit
-}
-get_host_by_name $hostname host
-if { ! [info exists host(addr)] } {
-	puts "Unknown host: $hostname"
-	exit -1
-}
-set colon_index [string first ":" $host(addr)]
-if { $colon_index == -1 } {
-	set ssh_host $host(addr)
+} elseif { [llength $argv] == 1 } {
+	set hostname [lindex $argv 0]
+	set argv [lrange $argv 1 end]
+	start_ssh_session $hostname {*}$argv
 } else {
-	set ssh_host [string range $host(addr) 0 [expr $colon_index-1]]
+	# Split terminal
+	start_tmux_session {*}$argv
 }
-set extra_args {}
-if { ![empty_string $host(id_path)] } { lappend extra_args -o IdentityFile=$host(id_path) }
-sshpass [list ssh "$host(login)@$ssh_host" -p $host(port) {*}$extra_args] -pass $host(pass) {*}$argv
